@@ -60,6 +60,20 @@ function summarizeErrorDetails(details: unknown): unknown {
   return "REDACTED_NON_OBJECT_DETAILS";
 }
 
+function publicErrorMessage(statusCode: number, fallbackMessage: string): string {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (!isProduction) return fallbackMessage;
+  return statusCode >= 500 ? "Internal server error" : "Request failed";
+}
+
+function publicErrorDetails(details: unknown): unknown {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (isProduction) return undefined;
+  return summarizeErrorDetails(details);
+}
+
 export const errorHandler = (
   err: Error | AppError | SyntaxError,
   req: Request,
@@ -68,12 +82,14 @@ export const errorHandler = (
 ): void => {
   if (err instanceof SyntaxError && "body" in err) {
     logger.warn("JSON Parse Error", { message: err.message, path: req.path });
+    const details = publicErrorDetails({ message: err.message });
+
     res.status(400).json({
       error: {
         code: "INVALID_JSON",
         error_code: "INVALID_JSON",
-        message: "Invalid JSON payload",
-        details: { message: err.message },
+        message: publicErrorMessage(400, "Invalid JSON payload"),
+        ...(details !== undefined ? { details } : {}),
       },
     });
     return;
@@ -89,13 +105,15 @@ export const errorHandler = (
       details: summarizeErrorDetails(err.details),
     });
 
+    const publicDetails = publicErrorDetails(err.details);
+
     res.status(err.statusCode).json({
       error: {
         code: err.code,
         error_code: err.code,
-        message: err.message,
+        message: publicErrorMessage(err.statusCode, err.message),
         statusCode: err.statusCode,
-        ...(err.details ? { details: err.details } : {}),
+        ...(publicDetails !== undefined ? { details: publicDetails } : {}),
       },
     });
     return;
